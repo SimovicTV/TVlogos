@@ -57,7 +57,7 @@ jobs:
                   data = response.read()
 
               # Provera stvarnog PNG potpisa, ne samo ekstenzije.
-              if not data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+              if not data.startswith(b"\x89PNG\r\n\x1a\n"):
                   print(f"Preskacem fajl koji nije PNG: {name}")
                   continue
 
@@ -94,7 +94,7 @@ jobs:
 
                   while candidate.casefold() in used:
                       counter += 1
-                      tag = "copy" if counter == 1 else f"copy{counter}"
+                      tag = f"copy{counter}"
                       candidate = f"{stem}-{tag}{suffix}"
 
                   used.add(candidate.casefold())
