@@ -14,10 +14,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout my repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download German PNG logos from Fourqui
         shell: bash
@@ -110,7 +110,7 @@ jobs:
           PY
 
       - name: Publish ZIP in repository
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: logo-pack
           name: OTT Navigator Germany logo pack
