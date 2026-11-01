@@ -109,7 +109,25 @@ jobs:
               print(f"Duplikat: {old} -> {new}")
           PY
 
-      - name: Publish ZIP in repository
+      - name: Commit ZIP into germany folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p germany
+          cp dist/germany-logos.zip germany/germany-logos.zip
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add germany/germany-logos.zip
+          if git diff --cached --quiet; then
+            echo "ZIP is unchanged; no repository commit needed."
+          else
+            git commit -m "Update Germany OTT Navigator logo ZIP"
+            git push
+          fi
+
+      - name: Publish ZIP in GitHub Releases
         uses: softprops/action-gh-release@v3
         with:
           tag_name: logo-pack
