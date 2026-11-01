@@ -1,0 +1,120 @@
+name: Build Germany logo pack
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Svakog dana u 03:20 UTC
+    - cron: "20 3 * * *"
+  push:
+    paths:
+      - ".github/workflows/build-germany-logos.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout my repository
+        uses: actions/checkout@v4
+
+      - name: Download German PNG logos from Fourqui
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p work/germany
+          curl -fsSL \
+            "https://api.github.com/repos/Fourqui/tv/contents/countries/germany?ref=master" \
+            -o work/germany-list.json
+
+          python - <<'PY'
+          import json
+          import pathlib
+          import urllib.request
+
+          entries = json.loads(pathlib.Path("work/germany-list.json").read_text())
+          output = pathlib.Path("work/germany")
+          downloaded = 0
+
+          for item in entries:
+              if item.get("type") != "file":
+                  continue
+              name = item.get("name", "")
+              if not name.lower().endswith(".png"):
+                  continue
+
+              url = item.get("download_url")
+              if not url:
+                  continue
+
+              request = urllib.request.Request(
+                  url,
+                  headers={"User-Agent": "SimovicTV-TvLogoBuilder"}
+              )
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  data = response.read()
+
+              # Provera stvarnog PNG potpisa, ne samo ekstenzije.
+              if not data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                  print(f"Preskacem fajl koji nije PNG: {name}")
+                  continue
+
+              target = output / name
+              target.write_bytes(data)
+              downloaded += 1
+
+          print(f"Preuzeto PNG logotipa: {downloaded}")
+          if downloaded == 0:
+              raise SystemExit("Nije preuzet nijedan PNG fajl.")
+          PY
+
+      - name: Make flat OTT Navigator ZIP and resolve duplicate names
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          python - <<'PY'
+          import pathlib
+          import zipfile
+
+          source = pathlib.Path("work/germany")
+          archive = pathlib.Path("dist/germany-logos.zip")
+          used = set()
+          renamed = []
+
+          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+              for path in sorted(source.glob("*.png"), key=lambda p: p.name.lower()):
+                  original = path.name
+                  stem = path.stem
+                  suffix = path.suffix
+                  candidate = original
+                  counter = 0
+
+                  while candidate.casefold() in used:
+                      counter += 1
+                      tag = "copy" if counter == 1 else f"copy{counter}"
+                      candidate = f"{stem}-{tag}{suffix}"
+
+                  used.add(candidate.casefold())
+                  zf.write(path, arcname=candidate)
+
+                  if candidate != original:
+                      renamed.append((original, candidate))
+
+          print(f"ZIP napravljen: {archive}")
+          print(f"Broj PNG fajlova u ZIP-u: {len(used)}")
+          for old, new in renamed:
+              print(f"Duplikat: {old} -> {new}")
+          PY
+
+      - name: Publish ZIP in repository
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: logo-pack
+          name: OTT Navigator Germany logo pack
+          body: Automatically generated ZIP with PNG logos from Fourqui/tv countries/germany.
+          files: dist/germany-logos.zip
+          overwrite_files: true
+          make_latest: true
