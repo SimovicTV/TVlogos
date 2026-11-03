@@ -85,7 +85,7 @@ jobs:
                       raise RuntimeError(f"Missing download URL for {country}/{name}")
 
                   data = get_bytes(download_url)
-                  if not data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                  if not data.startswith(b"\x89PNG\r\n\x1a\n"):
                       raise RuntimeError(f"File has .png extension but is not a PNG: {country}/{name}")
 
                   (target_dir / pathlib.Path(name).name).write_bytes(data)
