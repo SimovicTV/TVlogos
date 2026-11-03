@@ -3,11 +3,9 @@ name: Build OTT icons pack (DE, CH, RS, UK)
 on:
   workflow_dispatch:
   schedule:
-    # Zimsko računanje vremena: 01:00 u Srbiji (00:00 UTC)
-    - cron: "0 0 1 1-3,11,12 *"
-    # Letnje računanje vremena: okida prethodne UTC večeri;
-    # schedule_guard propušta samo 01:00 prvog dana u Europe/Belgrade.
-    - cron: "0 23 30,31 3-9 *"
+    # Svakog 1. u mesecu u 01:00 po lokalnom vremenu u Srbiji
+    - cron: "0 1 1 * *"
+      timezone: "Europe/Belgrade"
   push:
     paths:
       - ".github/workflows/build-germany-logos.yml"
@@ -23,30 +21,7 @@ jobs:
       - name: Checkout my repository
         uses: actions/checkout@v5
 
-      - name: Check monthly schedule in Serbia timezone
-        id: schedule_guard
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Manual runs and repository updates should still build immediately.
-          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
-            echo "run_build=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          local_time="$(TZ=Europe/Belgrade date '+%d %H:%M')"
-          local_day="${local_time%% *}"
-          if [[ "${local_day}" == "01" ]]; then
-            echo "run_build=true" >> "${GITHUB_OUTPUT}"
-            echo "Confirmed scheduled run on the first day in Europe/Belgrade; current local time: ${local_time}."
-          else
-            echo "run_build=false" >> "${GITHUB_OUTPUT}"
-            echo "Skipping this UTC cron occurrence; local time is ${local_time}."
-          fi
-
       - name: Download PNG logos from Fourqui
-        if: steps.schedule_guard.outputs.run_build == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -129,7 +104,6 @@ jobs:
           PY
 
       - name: Build one flat OTT-Icons.zip and resolve duplicate names
-        if: steps.schedule_guard.outputs.run_build == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -192,7 +166,6 @@ jobs:
           PY
 
       - name: Commit ZIP into OTTNavigator folder
-        if: steps.schedule_guard.outputs.run_build == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -211,7 +184,6 @@ jobs:
           fi
 
       - name: Publish OTT-Icons.zip in GitHub Releases
-        if: steps.schedule_guard.outputs.run_build == 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: logo-pack
