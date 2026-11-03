@@ -1,4 +1,4 @@
-name: Build Germany logo pack
+name: Build OTT icons pack (DE, CH, RS, UK)
 
 on:
   workflow_dispatch:
@@ -15,62 +15,94 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout my repository
         uses: actions/checkout@v5
 
-      - name: Download German PNG logos from Fourqui
+      - name: Download PNG logos from Fourqui
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p work/germany
-          curl -fsSL \
-            "https://api.github.com/repos/Fourqui/tv/contents/countries/germany?ref=master" \
-            -o work/germany-list.json
-
+          mkdir -p work/source
           python - <<'PY'
           import json
           import pathlib
+          import time
+          import urllib.error
           import urllib.request
 
-          entries = json.loads(pathlib.Path("work/germany-list.json").read_text())
-          output = pathlib.Path("work/germany")
-          downloaded = 0
+          REPOSITORY = "Fourqui/tv"
+          SOURCE_COMMIT = "8ce8a93bf7eec29b4c563137de3d005fba56ccd7"
+          COUNTRIES = ("germany", "switzerland", "serbia", "united-kingdom")
+          ROOT = pathlib.Path("work/source")
+          ROOT.mkdir(parents=True, exist_ok=True)
 
-          for item in entries:
-              if item.get("type") != "file":
-                  continue
-              name = item.get("name", "")
-              if not name.lower().endswith(".png"):
-                  continue
-
-              url = item.get("download_url")
-              if not url:
-                  continue
-
+          def get_bytes(url):
               request = urllib.request.Request(
                   url,
-                  headers={"User-Agent": "SimovicTV-TvLogoBuilder"}
+                  headers={
+                      "User-Agent": "SimovicTV-OTT-Icons-Builder",
+                      "Accept": "application/vnd.github+json",
+                  },
               )
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  data = response.read()
+              last_error = None
+              for attempt in range(3):
+                  try:
+                      with urllib.request.urlopen(request, timeout=60) as response:
+                          return response.read()
+                  except (urllib.error.URLError, TimeoutError) as error:
+                      last_error = error
+                      if attempt < 2:
+                          time.sleep(2 ** attempt)
+              raise RuntimeError(f"Download failed: {url}: {last_error}")
 
-              # Provera stvarnog PNG potpisa, ne samo ekstenzije.
-              if not data.startswith(b"\x89PNG\r\n\x1a\n"):
-                  print(f"Preskacem fajl koji nije PNG: {name}")
-                  continue
+          total = 0
+          for country in COUNTRIES:
+              api_url = (
+                  f"https://api.github.com/repos/{REPOSITORY}/contents/"
+                  f"countries/{country}?ref={SOURCE_COMMIT}"
+              )
+              entries = json.loads(get_bytes(api_url).decode("utf-8"))
+              if not isinstance(entries, list):
+                  raise RuntimeError(f"GitHub did not return a file list for {country}")
 
-              target = output / name
-              target.write_bytes(data)
-              downloaded += 1
+              target_dir = ROOT / country
+              target_dir.mkdir(parents=True, exist_ok=True)
+              country_count = 0
 
-          print(f"Preuzeto PNG logotipa: {downloaded}")
-          if downloaded == 0:
-              raise SystemExit("Nije preuzet nijedan PNG fajl.")
+              for item in entries:
+                  if item.get("type") != "file":
+                      continue
+
+                  name = item.get("name", "")
+                  if not name.lower().endswith(".png"):
+                      continue
+
+                  download_url = item.get("download_url")
+                  if not download_url:
+                      raise RuntimeError(f"Missing download URL for {country}/{name}")
+
+                  data = get_bytes(download_url)
+                  if not data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                      raise RuntimeError(f"File has .png extension but is not a PNG: {country}/{name}")
+
+                  (target_dir / pathlib.Path(name).name).write_bytes(data)
+                  country_count += 1
+
+              if country_count == 0:
+                  raise RuntimeError(f"No PNG files were found in {country}")
+
+              total += country_count
+              print(f"{country}: downloaded {country_count} PNG files")
+
+          print(f"Total PNG files downloaded: {total}")
+          if total == 0:
+              raise SystemExit("No PNG files downloaded.")
           PY
 
-      - name: Make flat OTT Navigator ZIP and resolve duplicate names
+      - name: Build one flat OTT-Icons.zip and resolve duplicate names
         shell: bash
         run: |
           set -euo pipefail
@@ -79,60 +111,86 @@ jobs:
           import pathlib
           import zipfile
 
-          source = pathlib.Path("work/germany")
-          archive = pathlib.Path("dist/germany-logos.zip")
-          used = set()
-          renamed = []
+          COUNTRIES = ("germany", "switzerland", "serbia", "united-kingdom")
+          SOURCE = pathlib.Path("work/source")
+          ARCHIVE = pathlib.Path("dist/OTT-Icons.zip")
 
-          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-              for path in sorted(source.glob("*.png"), key=lambda p: p.name.lower()):
-                  original = path.name
-                  stem = path.stem
-                  suffix = path.suffix
-                  candidate = original
-                  counter = 0
+          used_names = set()
+          duplicate_count = 0
+          file_count = 0
 
-                  while candidate.casefold() in used:
-                      counter += 1
-                      tag = f"copy{counter}"
-                      candidate = f"{stem}-{tag}{suffix}"
+          with zipfile.ZipFile(
+              ARCHIVE,
+              mode="w",
+              compression=zipfile.ZIP_DEFLATED,
+              compresslevel=9,
+          ) as archive:
+              for country in COUNTRIES:
+                  country_dir = SOURCE / country
+                  for path in sorted(country_dir.glob("*.png"), key=lambda p: p.name.casefold()):
+                      stem = path.stem
+                      suffix = path.suffix
+                      archive_name = path.name
+                      copy_number = 0
 
-                  used.add(candidate.casefold())
-                  zf.write(path, arcname=candidate)
+                      while archive_name.casefold() in used_names:
+                          copy_number += 1
+                          archive_name = f"{stem}-copy{copy_number}{suffix}"
 
-                  if candidate != original:
-                      renamed.append((original, candidate))
+                      if copy_number:
+                          duplicate_count += 1
+                          print(f"Duplicate renamed: {path.name} -> {archive_name}")
 
-          print(f"ZIP napravljen: {archive}")
-          print(f"Broj PNG fajlova u ZIP-u: {len(used)}")
-          for old, new in renamed:
-              print(f"Duplikat: {old} -> {new}")
+                      used_names.add(archive_name.casefold())
+
+                      # Fixed ZIP timestamp keeps the archive reproducible when logos have not changed.
+                      info = zipfile.ZipInfo(archive_name, date_time=(2020, 1, 1, 0, 0, 0))
+                      info.compress_type = zipfile.ZIP_DEFLATED
+                      info.external_attr = 0o100644 << 16
+                      archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+                      file_count += 1
+
+          if file_count == 0:
+              raise SystemExit("ZIP would be empty.")
+
+          print(f"Created {ARCHIVE}")
+          print(f"PNG files in ZIP: {file_count}")
+          print(f"Duplicate filenames renamed: {duplicate_count}")
+
+          # Verify archive integrity before publishing.
+          with zipfile.ZipFile(ARCHIVE) as archive:
+              bad_file = archive.testzip()
+              if bad_file:
+                  raise SystemExit(f"ZIP integrity check failed: {bad_file}")
           PY
 
-      - name: Commit ZIP into germany folder
+      - name: Commit ZIP into OTTNavigator folder
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p germany
-          cp dist/germany-logos.zip germany/germany-logos.zip
+          mkdir -p OTTNavigator
+          cp dist/OTT-Icons.zip OTTNavigator/OTT-Icons.zip
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add germany/germany-logos.zip
+          git add OTTNavigator/OTT-Icons.zip
           if git diff --cached --quiet; then
-            echo "ZIP is unchanged; no repository commit needed."
+            echo "OTT-Icons.zip is unchanged; no repository commit needed."
           else
-            git commit -m "Update Germany OTT Navigator logo ZIP"
+            git commit -m "Update OTT Navigator icons (DE, CH, RS, UK)"
             git push
           fi
 
-      - name: Publish ZIP in GitHub Releases
+      - name: Publish OTT-Icons.zip in GitHub Releases
         uses: softprops/action-gh-release@v3
         with:
           tag_name: logo-pack
-          name: OTT Navigator Germany logo pack
-          body: Automatically generated ZIP with PNG logos from Fourqui/tv countries/germany.
-          files: dist/germany-logos.zip
+          name: OTT Navigator Icons - DE, CH, RS, UK
+          body: |
+            Combined OTT Navigator icon pack.
+            Sources: Fourqui/tv countries/germany, switzerland, serbia and united-kingdom.
+            Source commit: 8ce8a93bf7eec29b4c563137de3d005fba56ccd7
+          files: dist/OTT-Icons.zip
           overwrite_files: true
           make_latest: true
