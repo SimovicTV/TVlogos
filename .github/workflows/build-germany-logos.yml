@@ -36,9 +36,10 @@ jobs:
           fi
 
           local_time="$(TZ=Europe/Belgrade date '+%d %H:%M')"
-          if [[ "${local_time}" == "01 01:00" ]]; then
+          local_day="${local_time%% *}"
+          if [[ "${local_day}" == "01" ]]; then
             echo "run_build=true" >> "${GITHUB_OUTPUT}"
-            echo "Confirmed: first day of the month at 01:00 in Europe/Belgrade."
+            echo "Confirmed scheduled run on the first day in Europe/Belgrade; current local time: ${local_time}."
           else
             echo "run_build=false" >> "${GITHUB_OUTPUT}"
             echo "Skipping this UTC cron occurrence; local time is ${local_time}."
